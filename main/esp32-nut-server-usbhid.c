@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Unlicense OR CC0-1.0
  */
 
+#include "esp_mac.h"
 #include <stdio.h>
 #include <stdbool.h>
 #include <string.h>
@@ -40,7 +41,7 @@
 
 static led_strip_handle_t led_strip;
 
-static const char *TAG = "ups";
+static const char *TAG = "UPS";
 QueueHandle_t hid_host_event_queue;
 QueueHandle_t timer_queue;
 typedef struct
@@ -62,6 +63,10 @@ typedef struct
     void *arg;
 } hid_host_event_queue_t;
 
+static const char *hid_sub_class_names[] = {
+    "NO_SUBCLASS",
+    "BOOT_INTERFACE",
+};
 /**
  * @brief HID Protocol string names
  */
@@ -71,11 +76,15 @@ static const char *hid_proto_name_str[] = {
     "MOUSE"};
 
 // =tcp server
-
-static char *ori_json = "{\"battery\":{\"charge\":{\"_root\":\"100\",\"low\":\"20\"},\"charger\":{\"status\":\"charging\"},\"runtime\":\"1104\",\"type\":\"PbAc\"},\"device\":{\"mfr\":\"EATON\",\"model\":\"SANTAK TG-BOX 850\",\"serial\":\"Blank\",\"type\":\"ups\"},\"driver\":{\"name\":\"usbhid-ups\",\"parameter\":{\"pollfreq\":30,\"pollinterval\":2,\"port\":\"/dev/ttyS1\",\"synchronous\":\"no\"},\"version\":{\"_root\":\"2.7.4\",\"data\":\"MGE HID 1.39\",\"internal\":\"0.41\"}},\"input\":{\"transfer\":{\"high\":\"264\",\"low\":\"184\"}},\"outlet\":{\"1\":{\"desc\":\"PowerShare Outlet 1\",\"id\":\"1\",\"status\":\"on\",\"switchable\":\"no\"},\"desc\":\"Main Outlet\",\"id\":\"0\",\"switchable\":\"yes\"},\"output\":{\"frequency\":{\"nominal\":\"50\"},\"voltage\":{\"_root\":\"230.0\",\"nominal\":\"220\"}},\"ups\":{\"beeper\":{\"status\":\"enabled\"},\"delay\":{\"shutdown\":\"20\",\"start\":\"30\"},\"firmware\":\"02.08.0010\",\"load\":\"28\",\"mfr\":\"EATON\",\"model\":\"SANTAK TG-BOX 850\",\"power\":{\"nominal\":\"850\"},\"productid\":\"ffff\",\"serial\":\"Blank\",\"status\":\"OL\",\"timer\":{\"shutdown\":\"0\",\"start\":\"0\"},\"type\":\"offline / line interactive\",\"vendorid\":\"0463\"}}";
+/**
+*static char *ori_json = "{\"battery\":{\"charge\":{\"_root\":\"100\",\"low\":\"20\"},\"charger\":{\"status\":\"charging\"},\"runtime\":\"1104\",\"type\":\"PbAc\"},\"device\":{\"mfr\":\"EATON\",\"model\":\"SANTAK TG-BOX 850\",\"serial\":\"Blank\",\"type\":\"ups\"},\"driver\":{\"name\":\"usbhid-ups\",\"parameter\":{\"pollfreq\":30,\"pollinterval\":2,\"port\":\"/dev/ttyS1\",\"synchronous\":\"no\"},\"version\":{\"_root\":\"2.7.4\",\"data\":\"MGE HID 1.39\",\"internal\":\"0.41\"}},\"input\":{\"transfer\":{\"high\":\"264\",\"low\":\"184\"}},\"outlet\":{\"1\":{\"desc\":\"PowerShare Outlet 1\",\"id\":\"1\",\"status\":\"on\",\"switchable\":\"no\"},\"desc\":\"Main Outlet\",\"id\":\"0\",\"switchable\":\"yes\"},\"output\":{\"frequency\":{\"nominal\":\"50\"},\"voltage\":{\"_root\":\"230.0\",\"nominal\":\"220\"}},\"ups\":{\"beeper\":{\"status\":\"enabled\"},\"delay\":{\"shutdown\":\"20\",\"start\":\"30\"},\"firmware\":\"02.08.0010\",\"load\":\"28\",\"mfr\":\"EATON\",\"model\":\"SANTAK TG-BOX 850\",\"power\":{\"nominal\":\"850\"},\"productid\":\"ffff\",\"serial\":\"Blank\",\"status\":\"OL\",\"timer\":{\"shutdown\":\"0\",\"start\":\"0\"},\"type\":\"offline / line interactive\",\"vendorid\":\"0463\"}}";
+*/
+static char *ori_json = "{\"battery\":{\"charge\":{\"_root\":\"92\",\"low\":\"20\"},\"charger\":{\"status\":\"charging\"},\"runtime\":\"80\",\"type\":\"PbAc\"},\"device\":{\"mfr\":\"CyberPower\",\"model\":\"CP425SLG\",\"serial\":\"Blank\",\"type\":\"ups\"},\"driver\":{\"name\":\"usbhid-ups\",\"parameter\":{\"pollfreq\":30,\"pollinterval\":2,\"port\":\"/dev/ttyS3\",\"synchronous\":\"no\"},\"version\":{\"_root\":\"2.7.4\",\"data\":\"CyberPower HID 1.25\",\"internal\":\"0.41\"}},\"input\":{\"transfer\":{\"high\":\"150\",\"low\":\"110\"}},\"outlet\":{\"1\":{\"desc\":\"PowerShare Outlet 1\",\"id\":\"1\",\"status\":\"on\",\"switchable\":\"no\"},\"desc\":\"Main Outlet\",\"id\":\"0\",\"switchable\":\"Yes\"},\"output\":{\"frequency\":{\"nominal\":\"60\"},\"voltage\":{\"_root\":\"120.0\",\"nominal\":\"120\"}},\"ups\":{\"beeper\":{\"status\":\"enabled\"},\"delay\":{\"shutdown\":\"30\",\"start\":\"45\"},\"firmware\":\"V1.03\",\"load\":\"15\",\"mfr\":\"CyberPower\",\"model\":\"CP425SLG\",\"power\":{\"nominal\":\"425\"},\"productid\":\"0764\",\"serial\":\"Blank\",\"status\":\"OL\",\"timer\":{\"shutdown\":\"0\",\"start\":\"0\"},\"type\":\"line interactive\",\"vendorid\":\"0501\"}}";
 cJSON *json_object;
 
 char nut_list_var_text[2048]="";
+char nut_list_ups_text[2048]="";
+char ups_name[] = "qnapups";
 
 void init_json_object()
 {
@@ -84,7 +93,14 @@ void init_json_object()
 
 void gen_nut_list_var_text(cJSON *input, char *parent_path)
 {
-    char *prefix_text = "VAR qnapups ";
+    /*char buffer[1024];
+    snprintf(buffer, sizeof(buffer), "Dealer's Card is %C %C", char1, char2);
+    */
+   /*char *prefix_text = "VAR qnapups ";*/
+   char upsbuffer[24];
+   snprintf(upsbuffer, sizeof(upsbuffer), "VAR %s ", ups_name);
+    char *prefix_text = upsbuffer;
+    /*printf("prefix_text: %s\n,", prefix_text);*/
     if (cJSON_IsString(input))
     {
         strcat(nut_list_var_text, parent_path);
@@ -122,6 +138,13 @@ void gen_nut_list_var_text(cJSON *input, char *parent_path)
 }
 
 /// @brief https://networkupstools.org/docs/developer-guide.chunked/ar01s09.html
+void gen_nut_list_ups_wrapper()
+{
+    strcpy(nut_list_ups_text, "BEGIN LIST UPS\n");
+    strcat(nut_list_ups_text, "UPS qnapups 'qnapups'\n");
+    strcat(nut_list_ups_text, "...\n");
+    strcat(nut_list_ups_text, "END LIST UPS\n");
+}
 void gen_nut_list_var_text_wrapper()
 {
     strcpy(nut_list_var_text, "BEGIN LIST VAR qnapups\n");
@@ -396,6 +419,12 @@ static void tcp_server_task(void *pvParameters)
                             gen_nut_list_var_text_wrapper();
                             rt = nut_list_var_text;
                         }
+                        else if (str_startswith(rx_buffer, "LIST UPS"))
+                        {
+                            gen_nut_list_ups_wrapper();
+                            rt = nut_list_ups_text;
+                            /*printf ("nut_list_ups_text: %s\n", nut_list_ups_text);*/
+                        }
                         else if (str_startswith(rx_buffer, "GET VAR qnapups ups.status"))
                         {
                             cJSON *got_item;
@@ -459,7 +488,7 @@ error:
  */
 static void hid_print_new_device_report_header(hid_protocol_t proto)
 {
-    static hid_protocol_t prev_proto_output = -1;
+    static hid_protocol_t prev_proto_output = -1;    
 
     if (prev_proto_output != proto)
     {
@@ -514,7 +543,7 @@ void hid_host_interface_callback(hid_host_device_handle_t hid_device_handle,
     size_t data_length = 0;
     hid_host_dev_params_t dev_params;
     ESP_ERROR_CHECK(hid_host_device_get_params(hid_device_handle, &dev_params));
-
+    
     switch (event)
     {
     case HID_HOST_INTERFACE_EVENT_INPUT_REPORT:
@@ -566,6 +595,11 @@ void hid_host_device_event(hid_host_device_handle_t hid_device_handle,
     switch (event)
     {
     case HID_HOST_DRIVER_EVENT_CONNECTED:
+    printf("USB port %d, interface %d, '%s', '%s'\n",
+               dev_params.addr,
+               dev_params.iface_num,
+               hid_sub_class_names[dev_params.sub_class],
+               hid_proto_name_str[dev_params.proto]);
 
         ESP_LOGI(TAG, "hid_host_device_event: HID Device, protocol '%s' CONNECTED",
                  hid_proto_name_str[dev_params.proto]);
@@ -575,6 +609,79 @@ void hid_host_device_event(hid_host_device_handle_t hid_device_handle,
             .callback_arg = NULL};
 
         ESP_ERROR_CHECK(hid_host_device_open(hid_device_handle, &dev_config));
+          
+        // Class device requests
+        // hid_host_get_report_descriptor
+        uint8_t *test_buffer = NULL;
+        unsigned int test_length = 0;
+        test_buffer = hid_host_get_report_descriptor(hid_device_handle, &test_length);
+
+        /*
+        ESP_ERROR_CHECK(test_buffer);
+        printf("HID Report descriptor length: %d\n", test_length);
+        */
+
+        // // HID Device info
+                
+        hid_host_dev_info_t hid_dev_info;
+        ESP_ERROR_CHECK(hid_host_get_device_info(hid_device_handle,
+                          &hid_dev_info) );
+
+        size_t devvid = hid_dev_info.VID;
+        size_t devpid = hid_dev_info.PID;
+        wchar_t* devmfr = hid_dev_info.iManufacturer;
+        wchar_t* devser = hid_dev_info.iSerialNumber;
+        wchar_t* devprod = hid_dev_info.iProduct;
+        
+        char setted_text[32]; // Buffer to
+        cJSON *got_item; 
+
+        itoa(devpid, setted_text, 16);
+        got_item = cJSON_GetObjectItemCaseSensitive(json_object, "ups");
+        got_item = cJSON_GetObjectItemCaseSensitive(got_item, "productid");
+        cJSON_SetValuestring(got_item, setted_text);
+
+        itoa(devvid, setted_text, 16);
+        got_item = cJSON_GetObjectItemCaseSensitive(json_object, "ups");
+        got_item = cJSON_GetObjectItemCaseSensitive(got_item, "vendorid");
+        cJSON_SetValuestring(got_item, setted_text);
+
+        wcstombs(setted_text, devmfr, sizeof(setted_text));
+        got_item = cJSON_GetObjectItemCaseSensitive(json_object, "ups");
+        got_item = cJSON_GetObjectItemCaseSensitive(got_item, "mfr");
+        cJSON_SetValuestring(got_item, setted_text);
+
+        wcstombs(setted_text, devprod, sizeof(setted_text));
+        got_item = cJSON_GetObjectItemCaseSensitive(json_object, "ups");
+        got_item = cJSON_GetObjectItemCaseSensitive(got_item, "model");
+        cJSON_SetValuestring(got_item, setted_text);
+
+        wcstombs(setted_text, devser, sizeof(setted_text));
+        got_item = cJSON_GetObjectItemCaseSensitive(json_object, "ups");
+        got_item = cJSON_GetObjectItemCaseSensitive(got_item, "serial");
+        cJSON_SetValuestring(got_item, setted_text);
+
+        wcstombs(setted_text, devmfr, sizeof(setted_text));
+        got_item = cJSON_GetObjectItemCaseSensitive(json_object, "device");
+        got_item = cJSON_GetObjectItemCaseSensitive(got_item, "mfr");
+        cJSON_SetValuestring(got_item, setted_text);
+
+        wcstombs(setted_text, devprod, sizeof(setted_text));
+        got_item = cJSON_GetObjectItemCaseSensitive(json_object, "device");
+        got_item = cJSON_GetObjectItemCaseSensitive(got_item, "model");
+        cJSON_SetValuestring(got_item, setted_text);
+
+        wcstombs(setted_text, devser, sizeof(setted_text));
+        got_item = cJSON_GetObjectItemCaseSensitive(json_object, "device");
+        got_item = cJSON_GetObjectItemCaseSensitive(got_item, "serial");
+        cJSON_SetValuestring(got_item, setted_text);
+
+        printf("\t VID: 0x%04X\n", hid_dev_info.VID);
+        printf("\t PID: 0x%04X\n", hid_dev_info.PID);
+        wprintf(L"\t iProduct: %S \n", hid_dev_info.iProduct);
+        wprintf(L"\t iManufacturer: %S \n", hid_dev_info.iManufacturer);
+        wprintf(L"\t iSerialNumber: %S \n", hid_dev_info.iSerialNumber);
+        
         if (HID_SUBCLASS_BOOT_INTERFACE == dev_params.sub_class)
         {
             ESP_ERROR_CHECK(hid_class_request_set_protocol(hid_device_handle, HID_REPORT_PROTOCOL_BOOT));
@@ -612,12 +719,12 @@ static void usb_lib_task(void *arg)
     };
 
     ESP_ERROR_CHECK(usb_host_install(&host_config));
-    xTaskNotifyGive(arg);
-
+    xTaskNotifyGive(arg);    
+    
     while (true/*gpio_get_level(APP_QUIT_PIN) != 0*/)
     {
         uint32_t event_flags;
-        usb_host_lib_handle_events(portMAX_DELAY, &event_flags);
+        usb_host_lib_handle_events(portMAX_DELAY, &event_flags);        
 
         // Release devices once all clients has deregistered
         if (event_flags & USB_HOST_LIB_EVENT_FLAGS_NO_CLIENTS)
@@ -642,20 +749,20 @@ static void usb_lib_task(void *arg)
 
 void set_beep(bool enabled)
 {
-    uint8_t send[2] = {0x1f, 0x02};
+    uint8_t send[2] = {0x0c, 0x02};
     size_t len = 2;
     if (!enabled)
     {
         send[1] = 0x01;
     }
     
-    hid_class_request_set_report(latest_hid_device_handle, 0x03, 0x1f, &send, len);
+    hid_class_request_set_report(latest_hid_device_handle, 0x03, 0x0c, send, len);
 }
 
 void refresh_ups_status_from_hid(bool *beep)
 {
     /**
-     * Everything below is specific for SANTAK TG-BOX 850
+     * Everything below is specific for CyberPower CP1500AVR UPS
      * 
      * Those protocol is hard-encode here. It may not supported by other ups products.
      * 
@@ -663,54 +770,122 @@ void refresh_ups_status_from_hid(bool *beep)
     uint8_t recv[8] = {0xff};
     size_t len;
     
-    len = 4;
-    memset(recv, 0xFF, len);
-    hid_class_request_get_report(latest_hid_device_handle, 0x03, 0x01, &recv, &len);
+    len = 6;
+    memset(recv, 0xff, len);
+    hid_class_request_get_report(latest_hid_device_handle, 0x03, 0x0b, recv, &len);
     bool ac_present = recv[1] & 1;
-    bool charging = recv[1] & (1 << 2);
-    bool discharging = recv[1] & (1 << 4);
+    bool charging = recv[1] & (1 << 1);
+    bool discharging = recv[1] & (1 << 2);
     bool good = recv[1] & (1 << 5);
     bool internal_failure = recv[1] & (1 << 6);
     bool need_replacement = recv[1] & (1 << 7);
-    bool all_good_flag = good && !internal_failure && !need_replacement;
-    bool overload = recv[2] > 0;
-    bool shutdown_imminent = recv[3] > 0;
+    bool all_good_flag = good && !internal_failure && !need_replacement;    
+    bool shutdown_imminent = (recv[1] & (1 << 5)) > 0;
+    bool belowcap = (recv[1] & (1 << 3)) > 0;
+    bool timeexpired = (recv[1] & (1 << 5)) > 0;
+
+    /*printf("belowcap: %d\n", belowcap);
+    printf("timeexpired: %d\n", timeexpired);*/
+
+    len = 6;
+    memset(recv, 0xff, len);
+    hid_class_request_get_report(latest_hid_device_handle, 0x03, 0x17, recv, &len);
+    bool overload = recv[1];
+    /*printf("overload: %d\n", overload);*/
 
     char alert_text[20] = "";
-    if (!all_good_flag)
+    if (belowcap)
     {
-        strcat(alert_text, "【欠佳】");
+        strcat(alert_text, " [Below Capacity] ");
     }
     if (overload)
     {
-        strcat(alert_text, "【过载】");
+        strcat(alert_text, " [Overload] ");
     }
     if (shutdown_imminent)
     {
-        strcat(alert_text, "【即将停供】");
+        strcat(alert_text, "[shutdown Imminent]");
     }
+    /*
+    len = 8;
+    memset(recv, 0xFF, len);
+    hid_class_request_get_report(latest_hid_device_handle, 0x03, 0x03, recv, &len);
+    char iname = recv[1];
+    printf("iname: %c\n", iname);
+    */
 
     len = 6;
     memset(recv, 0xFF, len);
-    hid_class_request_get_report(latest_hid_device_handle, 0x03, 0x06, &recv, &len);
+    hid_class_request_get_report(latest_hid_device_handle, 0x03, 0x08, recv, &len);
     size_t battery_charge = recv[1];
-    size_t battery_runtime = recv[2] + 256 * recv[3] + 256 * 256 * recv[4] + 256 * 256 * 256 * recv[5];
+    /*size_t battery_runtime = recv[2] + 256 * recv[3] + 256 * 256 * recv[4] + 256 * 256 * 256 * recv[5];*/
+    size_t battery_runtime = recv[2] + 256 * recv[3];
+
+    printf("Battery Runtime: %ds(%.2fmin)\n", battery_runtime, 1.0 * battery_runtime / 60);
 
     len = 8;
     memset(recv, 0xFF, len);
-    hid_class_request_get_report(latest_hid_device_handle, 0x03, 0x07, &recv, &len);
-    size_t ups_load = recv[6];
+    hid_class_request_get_report(latest_hid_device_handle, 0x03, 0x10, recv, &len);
+    size_t low_voltage = recv[1];
+    size_t high_voltage = recv[3];
+
+    len = 8;
+    memset(recv, 0xFF, len);
+    hid_class_request_get_report(latest_hid_device_handle, 0x03, 0x12, recv, &len);
+    size_t actual_voltage = recv[1];
+
+    printf("Actual Voltage: %zu\n", actual_voltage);
+    
+    len = 8;
+    memset(recv, 0xFF, len);
+    hid_class_request_get_report(latest_hid_device_handle, 0x03, 0x13, recv, &len);
+    size_t ups_load = recv[1];
+
+    len = 8;
+    memset(recv, 0xFF, len);
+    hid_class_request_get_report(latest_hid_device_handle, 0x03, 0x15, recv, &len);
+    size_t shutdown_delay = recv[1];
+
+    len = 8;
+    memset(recv, 0xFF, len);
+    hid_class_request_get_report(latest_hid_device_handle, 0x03, 0x16, recv, &len);
+    size_t start_delay = recv[1];
+
+    /*
+    len = 3;
+    memset(recv, 0xFF, len);
+    hid_class_request_get_report(latest_hid_device_handle, 0x03, 0x18, recv, &len);
+    size_t config_power = recv[1];
+    printf("Config Power: %zu\n", config_power);
+    */
 
     len = 3;
     memset(recv, 0xFF, len);
-    hid_class_request_get_report(latest_hid_device_handle, 0x03, 0x0e, &recv, &len);
-    size_t actual_voltage = recv[1] + 256 * recv[2];
+    hid_class_request_get_report(latest_hid_device_handle, 0x03, 0x19, recv, &len);
+    size_t active_power = recv[1];
+
+    printf("Active Power: %zu\n", active_power);
+    
 
     len = 8;
     memset(recv, 0xFF, len);
-    hid_class_request_get_report(latest_hid_device_handle, 0x03, 0x1f, &recv, &len);
-    size_t audible_alarm_control = recv[1];
+    hid_class_request_get_report(latest_hid_device_handle, 0x03, 0x0e, recv, &len);
+    size_t config_voltage = recv[1];
 
+    len = 8;
+    memset(recv, 0xFF, len);
+    hid_class_request_get_report(latest_hid_device_handle, 0x03, 0x0f, recv, &len);
+    /*size_t actual_voltage = recv[1] + 256 * recv[2];*/
+    size_t input_voltage = recv[1];
+
+    printf("Input Voltage: %zu\n", input_voltage);
+
+    
+    len = 8;
+    memset(recv, 0xFF, len);
+    hid_class_request_get_report(latest_hid_device_handle, 0x03, 0x0c, recv, &len);
+    size_t audible_alarm_control = recv[1];
+    
     /*
     * According to the UPS HID protocol,
     * AudibleAlarmControl:
@@ -720,6 +895,7 @@ void refresh_ups_status_from_hid(bool *beep)
     * I have not tested what will happen when flag = 3
     */
     *beep = audible_alarm_control == 2;
+    
 
     // Start to change the json object text
     char setted_text[32];
@@ -735,7 +911,7 @@ void refresh_ups_status_from_hid(bool *beep)
     {
         strcpy(setted_text, " LB");
     }
-    if (!all_good_flag)
+    if (belowcap)
     {
         strcpy(setted_text, " RB");
     }
@@ -752,6 +928,30 @@ void refresh_ups_status_from_hid(bool *beep)
     got_item = cJSON_GetObjectItemCaseSensitive(json_object, "battery");
     got_item = cJSON_GetObjectItemCaseSensitive(got_item, "charge");
     got_item = cJSON_GetObjectItemCaseSensitive(got_item, "_root");
+    cJSON_SetValuestring(got_item, setted_text);
+
+    itoa(low_voltage, setted_text, 10);
+    got_item = cJSON_GetObjectItemCaseSensitive(json_object, "input");
+    got_item = cJSON_GetObjectItemCaseSensitive(got_item, "transfer");
+    got_item = cJSON_GetObjectItemCaseSensitive(got_item, "low");
+    cJSON_SetValuestring(got_item, setted_text);
+
+    itoa(high_voltage, setted_text, 10);
+    got_item = cJSON_GetObjectItemCaseSensitive(json_object, "input");
+    got_item = cJSON_GetObjectItemCaseSensitive(got_item, "transfer");
+    got_item = cJSON_GetObjectItemCaseSensitive(got_item, "high");
+    cJSON_SetValuestring(got_item, setted_text);
+
+    itoa(shutdown_delay, setted_text, 10);
+    got_item = cJSON_GetObjectItemCaseSensitive(json_object, "ups");
+    got_item = cJSON_GetObjectItemCaseSensitive(got_item, "delay");
+    got_item = cJSON_GetObjectItemCaseSensitive(got_item, "shutdown");
+    cJSON_SetValuestring(got_item, setted_text);
+
+    itoa(start_delay, setted_text, 10);
+    got_item = cJSON_GetObjectItemCaseSensitive(json_object, "ups");
+    got_item = cJSON_GetObjectItemCaseSensitive(got_item, "delay");
+    got_item = cJSON_GetObjectItemCaseSensitive(got_item, "start");
     cJSON_SetValuestring(got_item, setted_text);
     
     strcpy(setted_text, "");
@@ -771,7 +971,7 @@ void refresh_ups_status_from_hid(bool *beep)
     itoa(battery_runtime, setted_text, 10);
     got_item = cJSON_GetObjectItemCaseSensitive(json_object, "battery");
     got_item = cJSON_GetObjectItemCaseSensitive(got_item, "runtime");
-    cJSON_SetValuestring(got_item, setted_text);
+    cJSON_SetValuestring(got_item, setted_text);   
 
     itoa(ups_load, setted_text, 10);
     got_item = cJSON_GetObjectItemCaseSensitive(json_object, "ups");
@@ -792,14 +992,18 @@ void refresh_ups_status_from_hid(bool *beep)
     {
         strcpy(setted_text, "disabled");
     }
+    
     got_item = cJSON_GetObjectItemCaseSensitive(json_object, "ups");
     got_item = cJSON_GetObjectItemCaseSensitive(got_item, "beeper");
     got_item = cJSON_GetObjectItemCaseSensitive(got_item, "status");
     cJSON_SetValuestring(got_item, setted_text);
 
-    ESP_LOGI(TAG, "%s外部电源: %s, 充电: %s, 放电: %s, 蜂鸣器状态: %s, 电池电量: %d%%, 当前负载: %d%%, 剩余带机时长: %ds(%.2fmin)", alert_text, ac_present ? "ON" : "OFF", charging ? "Y" : "N", discharging ? "Y" : "N", audible_alarm_control == 2 ? "ON" : "OFF", battery_charge, ups_load, battery_runtime, 1.0 * battery_runtime / 60);
+    /*ESP_LOGI(TAG, "%sAC Power: %s, Charging: %s, Discharging: %s, Buzzer Status: %s, Battery Power: %d%%, UPS Load: %d%%, Battery Runtime: %ds(%.2fmin)", alert_text, ac_present ? "ON" : "OFF", charging ? "Y" : "N", discharging ? "Y" : "N", audible_alarm_control == 2 ? "ON" : "OFF", battery_charge, ups_load, battery_runtime, 1.0 * battery_runtime / 60);
+    */
+    ESP_LOGI(TAG, "%s AC Power: %s, Charging: %s, Discharging: %s, Buzzer Status: %s, Battery Power: %d%%, UPS Load: %d%%, Battery Runtime: %ds(%.2fmin)", alert_text, ac_present ? "ON" : "OFF", charging ? "Y" : "N", discharging ? "Y" : "N", audible_alarm_control == 2 ? "ON" : "OFF", battery_charge, ups_load, battery_runtime, 1.0 * battery_runtime / 60);
     
-    if (all_good_flag && ac_present)
+
+    if (!belowcap && ac_present)
     {
         led_strip_set_pixel(led_strip, 0, 0, 0x03, 0);
         /* Refresh the strip to send data */
@@ -840,7 +1044,7 @@ void timer_task(void *pvParameters)
                 led_strip_set_pixel(led_strip, 0, 0x08, 0x05, 0);
                 /* Refresh the strip to send data */
                 led_strip_refresh(led_strip);
-                ESP_LOGI(TAG, "断开");
+                ESP_LOGI(TAG, "Disconnected");
                 cJSON *got_item;
                 got_item = cJSON_GetObjectItemCaseSensitive(json_object, "ups");
                 got_item = cJSON_GetObjectItemCaseSensitive(got_item, "status");
